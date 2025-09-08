@@ -23,6 +23,7 @@
 #define OBS_SIZE (31 + ACTIONS_SIZE)   // 31 = 13+13+2+1+1+1
 
 #define DECK_SIZE 52
+#define PLAYERS 4
 
 static const int DECK[DECK_SIZE] = {
     1,1,1,1, 2,2,2,2, 3,3,3,3,
@@ -64,8 +65,8 @@ struct CBullshit {
     int deck[DECK_SIZE];
     int deck_index;
 
-    int hands[2][MAX_RANK];
-    int hand_totals[2];
+    int hands[PLAYERS][MAX_RANK];
+    int hand_totals[PLAYERS];
     int claimed[MAX_RANK];
     int known[MAX_RANK];
 
@@ -118,14 +119,13 @@ void initCBullShit(CBullshit* env) {
     memset(&env->log, 0, sizeof(Log));
     env->client = NULL;
 
-    for (int p = 0; p < 2; p++) {
+    for (int p = 0; p < PLAYERS; p++) {
         env->hand_totals[p] = 0;
         for (int r = 0; r <= MAX_RANK; r++) env->hands[p][r] = 0;
     }
     for (int i = 0; i < ACTIONS_SIZE; i++) env->action_masks[i] = 0;
 }
 
-/* Stolen from TT */
 void allocateCBullShit(CBullshit* env) {
     env->actions = (int*)calloc(1, sizeof(int));
     env->observations = (float*)calloc(OBS_SIZE, sizeof(float));
@@ -134,7 +134,6 @@ void allocateCBullShit(CBullshit* env) {
     initCBullShit(env);
 }
 
-/* this should be safer then TT's implementation but who knows ¯\_(ツ)_/¯ */
 void c_close(CBullshit* env) {
     if (env->client != NULL)closeClient(env->client); env->client = NULL;
     free(env->observations); env->observations = NULL;
@@ -143,8 +142,7 @@ void c_close(CBullshit* env) {
     free(env->terminals); env->terminals = NULL;
 }
 
-/* random bullshit go! */
-void free_allocated_cbullshit(CBullshit* env) {
+void freeCBullshit(CBullshit* env) {
     c_close(env);
 }
 
@@ -153,14 +151,18 @@ void c_reset(CBullshit* env) {
     shuffle(env->deck);
     env->deck_index = 0;
 
-    for (int i = 0; i < DECK_SIZE; i+=2) {
+    for (int i = 0; i < DECK_SIZE; i+=PLAYERS) {
         int r0 = env->deck[i];
         int r1 = env->deck[i+1];
         env->hands[0][r0] += 1;
-        env->hand_totals[0] += 1;
         env->hands[1][r1] += 1;
-        env->hand_totals[1] += 1;
+        env->hands[2][r0] += 1;
+        env->hands[3][r1] += 1;
     }
+    env->hand_totals[0] += DECK_SIZE/PLAYERS;
+    env->hand_totals[1] += DECK_SIZE/PLAYERS;
+    env->hand_totals[2] += DECK_SIZE/PLAYERS;
+    env->hand_totals[3] += DECK_SIZE/PLAYERS;
 
     env->deck_index = DECK_SIZE;
     env->pile_size = 0;
@@ -243,7 +245,7 @@ int botAct(CBullshit* env) {
     int bot = 1;
     int ranks_with_cards[MAX_RANK];
     int n = 0;
-    for (int r = 1; r <= MAX_RANK; r++) {
+    for (int r = 0; r < MAX_RANK; r++) {
         if (env->hands[bot][r] > 0) ranks_with_cards[n++] = r;
     }
     int chosen_rank = (n > 0) ? ranks_with_cards[rand() % n] : ((rand() % MAX_RANK) + 1);
@@ -256,9 +258,9 @@ int botAct(CBullshit* env) {
 
 int botCallBS(CBullshit* env) {
     float p = 0.12f;
-    if (env->last_declared_count >= 3) p = 0.35f;
+    p *= env->last_declared_count;
     float r = (float)rand() / (float)RAND_MAX;
-    return (r < p) ? 1 : 0;
+    return (r < p);
 }
 
 /* Caller resolves a BS call. caller_idx is the calling player (0 human, 1 bot).
