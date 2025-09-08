@@ -64,8 +64,10 @@ struct CBullshit {
     int deck[DECK_SIZE];
     int deck_index;
 
-    int hands[2][MAX_RANK+1];
+    int hands[2][MAX_RANK];
     int hand_totals[2];
+    int claimed[MAX_RANK];
+    int known[MAX_RANK];
 
     int pile[DECK_SIZE];
     int pile_size;
@@ -187,20 +189,19 @@ void c_reset(CBullshit* env) {
    0..12: player0 hand per-rank (1..13)
    13..25: claims history (1..13)
    26..38: guarnteed history (1..13) // this is what the nn placed and what has been revealed
-   39: player0 total
-   40: player1 total
-   41: player2 total
-   42: player3 total
-   43: pile size
-   44..56: last_declared_rank
-   57: last_declared_count
-   58..110 : action masks (53 floats)
+   39: player1 total
+   40: player2 total
+   41: player3 total
+   42: pile size
+   43..55: last_declared_rank
+   56: last_declared_count
+   57..109 : action masks (53 floats)
 */
 
 void computeObs(CBullshit* env) {
     int idx = 0;
-    for (int r = 1; r <= MAX_RANK; r++) env->observations[idx++] = (float)env->hands[0][r];
-    for (int r = 1; r <= MAX_RANK; r++) env->observations[idx++] = (float)env->hands[1][r];
+    for (int r = 0; r < MAX_RANK; r++) env->observations[idx++] = (float)env->hands[0][r];
+    for (int r = 0; r < MAX_RANK; r++) env->observations[idx++] = (float)env->hands[1][r];
     env->observations[idx++] = (float)env->hand_totals[0];
     env->observations[idx++] = (float)env->hand_totals[1];
     env->observations[idx++] = (float)env->pile_size;
@@ -209,43 +210,29 @@ void computeObs(CBullshit* env) {
     for (int i = 0; i < ACTIONS_SIZE; i++) env->observations[idx++] = (float)env->action_masks[i];
 }
 
-/* Update masks: prevent playing more cards than you have; CALL_BS only if can_call */
 void updateActionMasks(CBullshit* env) {
-    int my_total = env->hand_totals[0];
+    int agent_total = env->hand_totals[0];
     for (int a = 0; a < MAX_RANK * MAX_PLAY_COUNT; a++) {
-        int declared_count = (a % MAX_PLAY_COUNT) + 1;
-        if (my_total < declared_count || my_total == 0) env->action_masks[a] = 1;
-        else env->action_masks[a] = 0;
+        int declared_count = 1 + (a % MAX_PLAY_COUNT);
+        env->action_masks[a] = (agent_total < declared_count);
     }
-    env->action_masks[CALL_BS_ACTION] = env->can_call ? 0 : 1;
+    env->action_masks[CALL_BS_ACTION] = !env->can_call;
 }
 
-/* Add cards (array of ranks) to player's hand */
-static void add_cards_to_hand(CBullshit* env, int player_idx, int *cards, int n) {
+static void addCardsToHand(CBullshit* env, int player, int *cards, int n) {
     for (int i = 0; i < n; i++) {
         int r = cards[i];
-        if (r >= 1 && r <= MAX_RANK) {
-            env->hands[player_idx][r] += 1;
-            env->hand_totals[player_idx] += 1;
-        }
+        env->hands[player][r] += 1;
     }
+    env->hand_totals[player] += n;
 }
 
-/* Place a play: deterministically remove declared_count cards from player and append their real ranks to pile.
-   Removal rule: take from lowest rank upward until declared_count removed. */
-void placeCards(CBullshit* env, int declared_rank, int declared_count, int player_idx) {
-    int removed = 0;
-    for (int r = 1; r <= MAX_RANK && removed < declared_count; r++) {
-        while (env->hands[player_idx][r] > 0 && removed < declared_count) {
-            env->hands[player_idx][r] -= 1;
-            env->hand_totals[player_idx] -= 1;
-            if (env->pile_size < DECK_SIZE) {
-                env->pile[env->pile_size++] = r;
-            }
-            removed++;
-        }
+void placeCards(CBullshit* env, int declared_rank, int declared_count, int player) { 
+    env->hands[player][declared_rank] -= declared_count;
+    env->hand_totals[player] -= declared_count;
+   for (int i = 0; i < declared_count; i++) {
+        env->pile[env->pile_size++] = declared_rank;
     }
-    /* record declared info */
     env->last_declared_rank = declared_rank;
     env->last_declared_count = declared_count;
     env->can_call = 1;
@@ -308,13 +295,13 @@ void resolveCall(CBullshit* env, int caller_idx) {
 
     if (all_match) {
         /* caller wrong -> caller picks up pile */
-        add_cards_to_hand(env, caller_idx, temp, ntemp);
+        addCardsToHand(env, caller_idx, temp, ntemp);
         if (caller_idx == 0) {
             env->rewards[0] -= 0.5f; env->episode_return -= 0.5f;
         }
     } else {
         /* liar picks up pile */
-        add_cards_to_hand(env, play_player, temp, ntemp);
+        addCardsToHand(env, play_player, temp, ntemp);
         if (play_player == 0) {
             env->rewards[0] -= 0.5f; env->episode_return -= 0.5f;
         } else {
