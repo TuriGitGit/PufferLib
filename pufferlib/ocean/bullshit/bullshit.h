@@ -8,18 +8,18 @@
 
 /*
   Bullshit environment
-  - Action encoding: actions 0..(MAX_RANK*MAX_PLAY_COUNT - 1) represent (declared_rank, declared_count)
-    rank = action / MAX_PLAY_COUNT + 1
-    count = action % MAX_PLAY_COUNT + 1
+  - Action encoding: actions 0..(RANKS*SUITS - 1) represent (declared_rank, declared_count)
+    rank = action / SUITS + 1
+    count = action % SUITS + 1
   - CALL_BS_ACTION is the final action
   - OBS layout: player0 per-rank(13) + player1 per-rank(13) + player0_total + player1_total +
                 pile_size + last_declared_rank + last_declared_count + action masks (ACTIONS_SIZE)
 */
 
-#define MAX_RANK 13
-#define MAX_PLAY_COUNT 4
-#define CALL_BS_ACTION (MAX_RANK * MAX_PLAY_COUNT)
-#define ACTIONS_SIZE (MAX_RANK * MAX_PLAY_COUNT + 1)
+#define RANKS 13
+#define SUITS 4
+#define CALL_BS_ACTION (RANKS * SUITS)
+#define ACTIONS_SIZE (RANKS * SUITS + 1)
 #define OBS_SIZE (31 + ACTIONS_SIZE)   // 31 = 13+13+2+1+1+1
 
 #define DECK_SIZE 52
@@ -65,10 +65,10 @@ struct CBullshit {
     int deck[DECK_SIZE];
     int deck_index;
 
-    int hands[PLAYERS][MAX_RANK];
+    int hands[PLAYERS][RANKS];
     int hand_totals[PLAYERS];
-    int claimed[MAX_RANK];
-    int known[MAX_RANK];
+    int claimed[RANKS];
+    int known[RANKS];
 
     int pile[DECK_SIZE];
     int pile_size;
@@ -121,7 +121,7 @@ void initCBullShit(CBullshit* env) {
 
     for (int p = 0; p < PLAYERS; p++) {
         env->hand_totals[p] = 0;
-        for (int r = 0; r <= MAX_RANK; r++) env->hands[p][r] = 0;
+        for (int r = 0; r <= RANKS; r++) env->hands[p][r] = 0;
     }
     for (int i = 0; i < ACTIONS_SIZE; i++) env->action_masks[i] = 0;
 }
@@ -202,8 +202,8 @@ void c_reset(CBullshit* env) {
 
 void computeObs(CBullshit* env) {
     int idx = 0;
-    for (int r = 0; r < MAX_RANK; r++) env->observations[idx++] = (float)env->hands[0][r];
-    for (int r = 0; r < MAX_RANK; r++) env->observations[idx++] = (float)env->hands[1][r];
+    for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[0][r];
+    for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[1][r];
     env->observations[idx++] = (float)env->hand_totals[0];
     env->observations[idx++] = (float)env->hand_totals[1];
     env->observations[idx++] = (float)env->pile_size;
@@ -214,8 +214,8 @@ void computeObs(CBullshit* env) {
 
 void updateActionMasks(CBullshit* env) {
     int agent_total = env->hand_totals[0];
-    for (int a = 0; a < MAX_RANK * MAX_PLAY_COUNT; a++) {
-        int declared_count = 1 + (a % MAX_PLAY_COUNT);
+    for (int a = 0; a < RANKS * SUITS; a++) {
+        int declared_count = 1 + (a % SUITS);
         env->action_masks[a] = (agent_total < declared_count);
     }
     env->action_masks[CALL_BS_ACTION] = !env->can_call;
@@ -241,41 +241,41 @@ void placeCards(CBullshit* env, int declared_rank, int declared_count, int playe
 }
 
 /* Simple bot heuristics */
-int botAct(CBullshit* env) {
-    int bot = 1;
-    int ranks_with_cards[MAX_RANK];
-    int n = 0;
-    for (int r = 0; r < MAX_RANK; r++) {
-        if (env->hands[bot][r] > 0) ranks_with_cards[n++] = r;
+int botAct(CBullshit* env, int bot) {
+    int rank = -1;
+    int count = 0;
+    int total_ranks = 0;
+    for (int r = 0; r < RANKS; r++) {
+        if (env->hands[bot][r] > 0) {
+            total_ranks++;
+            if (rand() % total_ranks == 0) {
+                rank = r;
+                count = env->hands[bot][r];
+            }
+        }
     }
-    int chosen_rank = (n > 0) ? ranks_with_cards[rand() % n] : ((rand() % MAX_RANK) + 1);
-    int available = env->hand_totals[bot];
-    int max_allowed = (available < MAX_PLAY_COUNT) ? available : MAX_PLAY_COUNT;
-    int chosen_count = (max_allowed > 1) ? (rand() % max_allowed) + 1 : 1;
-    int action = (chosen_rank - 1) * MAX_PLAY_COUNT + (chosen_count - 1);
-    return action;
+    int chosen_count = (count > 1) ? rand() % count + 1 : 1;
+    return rank * SUITS + (chosen_count - 1);
 }
 
-int botCallBS(CBullshit* env) {
+
+
+int botCallBS(CBullshit* env) { 
     float p = 0.12f;
     p *= env->last_declared_count;
     float r = (float)rand() / (float)RAND_MAX;
     return (r < p);
 }
 
-/* Caller resolves a BS call. caller_idx is the calling player (0 human, 1 bot).
-   If the last declared segment is entirely equal to declared_rank -> caller was wrong -> caller picks up pile.
-   Otherwise the play_player picks up the pile. */
 void resolveCall(CBullshit* env, int caller_idx) {
     if (env->pile_size == 0 || env->last_declared_count == 0) {
         env->can_call = 0;
         return;
     }
 
-    int play_player = 1 - caller_idx;
+    int play_player = (caller_idx + PLAYERS - 1) % PLAYERS;
     int declared = env->last_declared_rank;
     int start_idx = env->pile_size - env->last_declared_count;
-    if (start_idx < 0) start_idx = 0;
 
     int all_match = 1;
     int* p = env->pile[start_idx];
@@ -284,51 +284,32 @@ void resolveCall(CBullshit* env, int caller_idx) {
         if (*p != declared) { all_match = 0; break; }
     }
 
-    /* copy pile */
-    int temp[DECK_SIZE];
-    int ntemp = env->pile_size;
-    for (int i = 0; i < env->pile_size; i++) temp[i] = env->pile[i];
-
-    /* clear pile and flags */
-    env->pile_size = 0;
-    env->last_declared_rank = 0;
-    env->last_declared_count = 0;
-    env->can_call = 0;
-
     if (all_match) {
-        /* caller wrong -> caller picks up pile */
-        addCardsToHand(env, caller_idx, temp, ntemp);
+        addCardsToHand(env, caller_idx, env->pile, env->pile_size);
         if (caller_idx == 0) {
             env->rewards[0] -= 0.5f; env->episode_return -= 0.5f;
         }
     } else {
-        /* liar picks up pile */
-        addCardsToHand(env, play_player, temp, ntemp);
+        addCardsToHand(env, play_player, env->pile, env->pile_size);
         if (play_player == 0) {
             env->rewards[0] -= 0.5f; env->episode_return -= 0.5f;
         } else {
             env->rewards[0] += 0.5f; env->episode_return += 0.5f;
         }
     }
-
-    /* detect terminal */
-    if (env->hand_totals[0] == 0 || env->hand_totals[1] == 0) {
-        env->terminals[0] = 1;
-        env->game_over = 1;
-        if (env->hand_totals[0] == 0 && env->hand_totals[1] != 0) { env->rewards[0] += 1.0f; env->episode_return += 1.0f; env->perf = 1.0f; }
-        else if (env->hand_totals[1] == 0 && env->hand_totals[0] != 0) { env->rewards[0] -= 1.0f; env->episode_return -= 1.0f; env->perf = 0.0f; }
-        else { env->perf = 0.0f; }
-    }
+    env->pile_size = 0;
+    env->last_declared_rank = 0;
+    env->last_declared_count = 0;
+    env->can_call = 0;
 }
 
 /* One-step environment update
    - reads env->actions[0]
    - apply play or CALL_BS
-   - resolves bot responses within the same step
+   - resolves bot responses within the same step // use a for loop for simplicity and then use #pragma unroll <BOTS>
    - updates rewards, observations, masks
 */
 void c_step(CBullshit* env) {
-    // START copy from TT ========================================
     env->episode_length += 1;
     env->rewards[0] = 0.0f;
     int action = env->actions[0];
@@ -339,13 +320,12 @@ void c_step(CBullshit* env) {
         env->rewards[0] -= 1.0f;
     }
 
-    if (env->game_over == 1) {
+    if (env->game_over) {
         env->perf = (env->hand_totals[0] == 0) ? 1.0f : 0.0f;
         addLog(env);
         c_reset(env);
         return;
     }
-    // END copy from TT ===========================================
 
 
     /* invalid action guard */
@@ -359,8 +339,8 @@ void c_step(CBullshit* env) {
         }
     } else {
         /* play action */
-        int declared_rank = (action / MAX_PLAY_COUNT) + 1;
-        int declared_count = (action % MAX_PLAY_COUNT) + 1;
+        int declared_rank = (action / SUITS) + 1;
+        int declared_count = (action % SUITS) + 1;
         if (declared_count > env->hand_totals[0] || env->hand_totals[0] == 0) {
             env->episode_return -= 0.1f; env->rewards[0] -= 0.1f;
         } else {
@@ -371,9 +351,10 @@ void c_step(CBullshit* env) {
                 if (botCallBS(env)) {
                     resolveCall(env, 1);
                 } else {
-                    int bot_action = botAct(env);
-                    int bot_rank = (bot_action / MAX_PLAY_COUNT) + 1;
-                    int bot_count = (bot_action % MAX_PLAY_COUNT) + 1;
+                    int bot = 1; // TODO: make turn based selection
+                    int bot_action = botAct(env, bot);
+                    int bot_rank = (bot_action / SUITS) + 1;
+                    int bot_count = (bot_action % SUITS) + 1;
                     if (bot_count > env->hand_totals[1]) bot_count = env->hand_totals[1] > 0 ? 1 : 0;
                     if (bot_count > 0) {
                         placeCards(env, bot_rank, bot_count, 1);
@@ -428,7 +409,7 @@ void c_render(CBullshit* env) {
     DrawText(TextFormat("Bot: %d cards", env->hand_totals[1]), env->width - 200, env->height - 80, 30, PUFF_RED);
 
     /* per-rank counts for both players (debug view) */
-    for (int r = 1; r <= MAX_RANK; r++) {
+    for (int r = 1; r <= RANKS; r++) {
         int x = 20 + (r - 1) * 36;
         DrawText(TextFormat("%d", env->hands[0][r]), x, env->height - 50, 12, PUFF_WHITE);
         DrawText(TextFormat("%d", env->hands[1][r]), x, env->height - 70, 12, PUFF_WHITE);
