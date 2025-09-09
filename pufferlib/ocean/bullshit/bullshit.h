@@ -23,6 +23,7 @@
 #define OBS_SIZE (31 + ACTIONS_SIZE)   // 31 = 13+13+2+1+1+1
 
 #define DECK_SIZE 52
+#define MAX_PILE_SIZE 48
 #define BOTS 3
 #define PLAYERS BOTS + 1 // multi-agent?
 
@@ -180,39 +181,40 @@ void c_reset(CBullshit* env) {
 }
 
 /* Observation layout:
-   0..12: player0 per-rank (1..13)
-   13..25: player1 per-rank
-   26: player0 total
-   27: player1 total
-   28: pile size
-   29: last_declared_rank
-   30: last_declared_count
-   31.. : action masks (ACTIONS_SIZE floats)
-*/
-
-/* Observation supposed to be layout:
-   0..12: player0 hand per-rank (1..13)
-   13..25: claims history (1..13)
-   26..38: guarnteed history (1..13) // this is what the nn placed and what has been revealed
-   39: player1 total
-   40: player2 total
-   41: player3 total
-   42: pile size
-   43..55: last_declared_rank
-   56: last_declared_count
-   57..109 : action masks (53 floats)
+   0..12: player0 hand per-rank (13) norm /4
+   13..25: claims history (13) norm /4
+   26..38: known history (13) norm /4
+   39: player1 total // norm /13
+   40: player2 total // norm /13
+   41: player3 total // norm /13
+   42: pile size // norm /48?
+   43..55: last_declared_rank (13 one-hot)
+   56: last_declared_count // norm /4
+   57..109 : action masks (53)
 */
 
 static inline void computeObs(CBullshit* env) {
-    int idx = 0;
-    for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[0][r];
-    for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[1][r];
-    env->observations[idx++] = (float)env->hand_totals[0];
-    env->observations[idx++] = (float)env->hand_totals[1];
-    env->observations[idx++] = (float)env->pile_size;
-    env->observations[idx++] = (float)env->last_declared_rank;
-    env->observations[idx++] = (float)env->last_declared_count;
-    for (int i = 0; i < ACTIONS_SIZE; i++) env->observations[idx++] = (float)env->action_masks[i];
+    int ob=0;
+    for (int r = 0; r < RANKS; r++) {
+        env->observations[ob++] = (float)env->hands[0][r] / SUITS;
+    }
+    for (int r = 0; r < RANKS; r++) {
+        env->observations[ob++] = (float)env->claimed[r] / SUITS;
+    }
+    for (int r = 0; r < RANKS; r++) {
+        env->observations[ob++] = (float)env->known[r] / SUITS;
+    }
+    env->observations[ob++] = (float)env->hand_totals[1] / RANKS;
+    env->observations[ob++] = (float)env->hand_totals[2] / RANKS;
+    env->observations[ob++] = (float)env->hand_totals[3] / RANKS;
+    env->observations[ob++] = (float)env->pile_size / MAX_PILE_SIZE;
+    for (int r = 0; r < RANKS; r++) {
+        env->observations[ob++] = (env->last_declared_rank == r) ? 1.0f : 0.0f;
+    }
+    env->observations[ob++] = (float)env->last_declared_count / SUITS;
+    for (int i = 0; i < ACTIONS_SIZE; i++) {
+        env->observations[ob++] = (float)env->action_masks[i];
+    }
 }
 
 static inline void updateActionMasks(CBullshit* env) {
