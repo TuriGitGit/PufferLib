@@ -243,8 +243,15 @@ static inline void placeCards(CBullshit* env, int declared_rank, int declared_co
     env->can_call = 1;
 }
 
-static inline int botAct(CBullshit* env, int bot) {
-    int rank = -1;
+static inline int botSuspicionCall(CBullshit* env) { 
+    float p = 0.12f;
+    p *= env->last_declared_count;
+    float r = (float)rand() / (float)RAND_MAX;
+    return (r < p);
+}
+
+static inline int botPlay(CBullshit* env, int bot) {
+    int rank = 0;
     int count = 0;
     int total_ranks = 0;
     for (int r = 0; r < RANKS; r++) {
@@ -257,16 +264,20 @@ static inline int botAct(CBullshit* env, int bot) {
         }
     }
     int chosen_count = (count > 1) ? rand() % count + 1 : 1;
-    return rank * SUITS + (chosen_count - 1);
+    return rank * SUITS + (chosen_count - 1); // 0-51
 }
 
-
-
-static inline int botCallBS(CBullshit* env) { 
-    float p = 0.12f;
-    p *= env->last_declared_count;
-    float r = (float)rand() / (float)RAND_MAX;
-    return (r < p);
+static inline void botAction(CBullshit* env, int bot) {
+    if (env->can_call) {
+        if (botSuspicionCall(env)) {
+            resolveCall(env, bot);
+        } else {
+            int bot_action = botPlay(env, bot);
+            int bot_rank = bot_action / SUITS;
+            int bot_count = 1+ (bot_action % SUITS);
+            placeCards(env, bot_rank, bot_count, bot);
+        }
+    }
 }
 
 void resolveCall(CBullshit* env, int caller_idx) {
@@ -321,7 +332,6 @@ static inline void terminate(CBullshit* env) {
         } else if (env->hand_totals[1] == 0 && env->hand_totals[0] != 0) {
             env->rewards[0] -= 1.0f; env->episode_return -= 1.0f; env->perf = 0.0f;
         } else {
-            /* draw */
             env->perf = 0.0f;
         }
     }
@@ -351,12 +361,11 @@ void c_step(CBullshit* env) {
         env->episode_return -= 0.1f; env->rewards[0] -= 0.1f;
     } else if (action == CALL_BS_ACTION) {
         if (env->can_call) {
-            resolveCall(env, 0);
+            resolveCall(env, 0); // give rewards based on result
         } else {
             env->episode_return -= 0.05f; env->rewards[0] -= 0.05f;
         }
     } else {
-        /* play action */
         int declared_rank = action / SUITS;
         int declared_count = 1+ (action % SUITS);
         if (declared_count > env->hand_totals[0] || env->hand_totals[0] == 0) {
@@ -365,20 +374,8 @@ void c_step(CBullshit* env) {
             placeCards(env, declared_rank, declared_count, 0);
 
             /* Bot may call or play */ // TODO: make multiple different bots
-            if (env->can_call) {
-                if (botCallBS(env)) {
-                    resolveCall(env, 1);
-                } else {
-                    int bot = 1; // TODO: make turn based selection
-                    int bot_action = botAct(env, bot);
-                    int bot_rank = bot_action / SUITS;
-                    int bot_count = 1+ (bot_action % SUITS);
-                    if (bot_count > env->hand_totals[1]) bot_count = env->hand_totals[1] > 0 ? 1 : 0;
-                    if (bot_count > 0) {
-                        placeCards(env, bot_rank, bot_count, 1);
-                        /* after bot play, human can CALL_BS on next step */
-                    }
-                }
+            for (int bot=1; bot <= BOTS; bot++) {
+                botAction(env, bot);
             }
         }
     }
