@@ -37,7 +37,7 @@ static const int DECK[DECK_SIZE] = {
 
 const Color PUFF_RED = (Color){187, 0, 0, 255};
 const Color PUFF_CYAN = (Color){0, 187, 187, 255};
-const Color PUFF_WHITE = (Color){241, 241, 241, 241};
+const Color PUFF_WHITE = (Color){241, 241, 241, 255};
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
 
 typedef struct Log Log;
@@ -92,7 +92,7 @@ void addLog(CBullshit* env) {
 }
 
 /* Fisher–Yates shuffle */
-static void shuffle(int *deck) {
+static inline void shuffle(int *deck) {
     for (int i = DECK_SIZE - 1; i > 0; i--) {
         int j = rand() % (i + 1);
         int tmp = deck[i];
@@ -121,12 +121,12 @@ void initCBullShit(CBullshit* env) {
 
     for (int p = 0; p < PLAYERS; p++) {
         env->hand_totals[p] = 0;
-        for (int r = 0; r <= RANKS; r++) env->hands[p][r] = 0;
+        for (int r = 0; r < RANKS; r++) env->hands[p][r] = 0;
     }
     for (int i = 0; i < ACTIONS_SIZE; i++) env->action_masks[i] = 0;
 }
 
-void allocateCBullShit(CBullshit* env) {
+static inline void allocateCBullShit(CBullshit* env) {
     env->actions = (int*)calloc(1, sizeof(int));
     env->observations = (float*)calloc(OBS_SIZE, sizeof(float));
     env->terminals = (unsigned char*)calloc(1, sizeof(unsigned char));
@@ -134,7 +134,7 @@ void allocateCBullShit(CBullshit* env) {
     initCBullShit(env);
 }
 
-void c_close(CBullshit* env) {
+static inline void c_close(CBullshit* env) {
     if (env->client != NULL)closeClient(env->client); env->client = NULL;
     free(env->observations); env->observations = NULL;
     free(env->actions); env->actions = NULL;
@@ -154,10 +154,12 @@ void c_reset(CBullshit* env) {
     for (int i = 0; i < DECK_SIZE; i+=PLAYERS) {
         int r0 = env->deck[i];
         int r1 = env->deck[i+1];
-        env->hands[0][r0] += 1;
-        env->hands[1][r1] += 1;
-        env->hands[2][r0] += 1;
-        env->hands[3][r1] += 1;
+        int r2 = env->deck[i+2];
+        int r3 = env->deck[i+3];
+        env->hands[0][r0-1] += 1;
+        env->hands[1][r1-1] += 1;
+        env->hands[2][r2-1] += 1;
+        env->hands[3][r3-1] += 1;
     }
     env->hand_totals[0] += DECK_SIZE/PLAYERS;
     env->hand_totals[1] += DECK_SIZE/PLAYERS;
@@ -200,7 +202,7 @@ void c_reset(CBullshit* env) {
    57..109 : action masks (53 floats)
 */
 
-void computeObs(CBullshit* env) {
+static inline void computeObs(CBullshit* env) {
     int idx = 0;
     for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[0][r];
     for (int r = 0; r < RANKS; r++) env->observations[idx++] = (float)env->hands[1][r];
@@ -212,7 +214,7 @@ void computeObs(CBullshit* env) {
     for (int i = 0; i < ACTIONS_SIZE; i++) env->observations[idx++] = (float)env->action_masks[i];
 }
 
-void updateActionMasks(CBullshit* env) {
+static inline void updateActionMasks(CBullshit* env) {
     int agent_total = env->hand_totals[0];
     for (int a = 0; a < RANKS * SUITS; a++) {
         int declared_count = 1 + (a % SUITS);
@@ -223,13 +225,13 @@ void updateActionMasks(CBullshit* env) {
 
 static void addCardsToHand(CBullshit* env, int player, int *cards, int n) {
     for (int i = 0; i < n; i++) {
-        int r = cards[i];
+        int r = cards[i] -1;
         env->hands[player][r] += 1;
     }
     env->hand_totals[player] += n;
 }
 
-void placeCards(CBullshit* env, int declared_rank, int declared_count, int player) { 
+static inline void placeCards(CBullshit* env, int declared_rank, int declared_count, int player) { 
     env->hands[player][declared_rank] -= declared_count;
     env->hand_totals[player] -= declared_count;
    for (int i = 0; i < declared_count; i++) {
@@ -240,8 +242,7 @@ void placeCards(CBullshit* env, int declared_rank, int declared_count, int playe
     env->can_call = 1;
 }
 
-/* Simple bot heuristics */
-int botAct(CBullshit* env, int bot) {
+static inline int botAct(CBullshit* env, int bot) {
     int rank = -1;
     int count = 0;
     int total_ranks = 0;
@@ -260,7 +261,7 @@ int botAct(CBullshit* env, int bot) {
 
 
 
-int botCallBS(CBullshit* env) { 
+static inline int botCallBS(CBullshit* env) { 
     float p = 0.12f;
     p *= env->last_declared_count;
     float r = (float)rand() / (float)RAND_MAX;
@@ -278,8 +279,8 @@ void resolveCall(CBullshit* env, int caller_idx) {
     int start_idx = env->pile_size - env->last_declared_count;
 
     int all_match = 1;
-    int* p = env->pile[start_idx];
-    int* e = env->pile[env->pile_size];
+    int* p = &env->pile[start_idx];
+    int* e = &env->pile[env->pile_size];
     for (; p < e; p++) {
         if (*p != declared) { all_match = 0; break; }
     }
@@ -339,8 +340,8 @@ void c_step(CBullshit* env) {
         }
     } else {
         /* play action */
-        int declared_rank = (action / SUITS) + 1;
-        int declared_count = (action % SUITS) + 1;
+        int declared_rank = action / SUITS;
+        int declared_count = 1+ (action % SUITS);
         if (declared_count > env->hand_totals[0] || env->hand_totals[0] == 0) {
             env->episode_return -= 0.1f; env->rewards[0] -= 0.1f;
         } else {
@@ -353,8 +354,8 @@ void c_step(CBullshit* env) {
                 } else {
                     int bot = 1; // TODO: make turn based selection
                     int bot_action = botAct(env, bot);
-                    int bot_rank = (bot_action / SUITS) + 1;
-                    int bot_count = (bot_action % SUITS) + 1;
+                    int bot_rank = bot_action / SUITS;
+                    int bot_count = 1+ (bot_action % SUITS);
                     if (bot_count > env->hand_totals[1]) bot_count = env->hand_totals[1] > 0 ? 1 : 0;
                     if (bot_count > 0) {
                         placeCards(env, bot_rank, bot_count, 1);
@@ -403,14 +404,14 @@ void c_render(CBullshit* env) {
     ClearBackground(PUFF_BACKGROUND);
 
     DrawText(TextFormat("Pile size: %d", env->pile_size), 20, 20, 20, PUFF_WHITE);
-    DrawText(TextFormat("Last declared: %d x %d", env->last_declared_rank, env->last_declared_count), 20, 40, 20, PUFF_WHITE);
+    DrawText(TextFormat("Last declared: %d x %d", 1+ env->last_declared_rank, env->last_declared_count), 20, 40, 20, PUFF_WHITE);
 
     DrawText(TextFormat("Agent: %d cards", env->hand_totals[0]), 20, env->height - 80, 30, PUFF_CYAN);
     DrawText(TextFormat("Bot: %d cards", env->hand_totals[1]), env->width - 200, env->height - 80, 30, PUFF_RED);
 
     /* per-rank counts for both players (debug view) */
-    for (int r = 1; r <= RANKS; r++) {
-        int x = 20 + (r - 1) * 36;
+    for (int r = 0; r < RANKS; r++) {
+        int x = 20 + r * 36;
         DrawText(TextFormat("%d", env->hands[0][r]), x, env->height - 50, 12, PUFF_WHITE);
         DrawText(TextFormat("%d", env->hands[1][r]), x, env->height - 70, 12, PUFF_WHITE);
     }
