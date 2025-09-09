@@ -23,7 +23,8 @@
 #define OBS_SIZE (31 + ACTIONS_SIZE)   // 31 = 13+13+2+1+1+1
 
 #define DECK_SIZE 52
-#define PLAYERS 4
+#define BOTS 3
+#define PLAYERS BOTS + 1 // multi-agent?
 
 static const int DECK[DECK_SIZE] = {
     1,1,1,1, 2,2,2,2, 3,3,3,3,
@@ -310,6 +311,22 @@ void resolveCall(CBullshit* env, int caller_idx) {
    - resolves bot responses within the same step // use a for loop for simplicity and then use #pragma unroll <BOTS>
    - updates rewards, observations, masks
 */
+
+static inline void terminate(CBullshit* env) {
+    if (env->hand_totals[0] == 0 || env->hand_totals[1] == 0) {
+        env->game_over = 1;
+        env->terminals[0] = 1;
+        if (env->hand_totals[0] == 0 && env->hand_totals[1] != 0) {
+            env->rewards[0] += 1.0f; env->episode_return += 1.0f; env->perf = 1.0f;
+        } else if (env->hand_totals[1] == 0 && env->hand_totals[0] != 0) {
+            env->rewards[0] -= 1.0f; env->episode_return -= 1.0f; env->perf = 0.0f;
+        } else {
+            /* draw */
+            env->perf = 0.0f;
+        }
+    }
+}
+
 void c_step(CBullshit* env) {
     env->episode_length += 1;
     env->rewards[0] = 0.0f;
@@ -367,19 +384,7 @@ void c_step(CBullshit* env) {
     }
 
     /* check terminal after step */
-    if (env->hand_totals[0] == 0 || env->hand_totals[1] == 0) {
-        env->game_over = 1;
-        env->terminals[0] = 1;
-        if (env->hand_totals[0] == 0 && env->hand_totals[1] != 0) {
-            env->rewards[0] += 1.0f; env->episode_return += 1.0f; env->perf = 1.0f;
-        } else if (env->hand_totals[1] == 0 && env->hand_totals[0] != 0) {
-            env->rewards[0] -= 1.0f; env->episode_return -= 1.0f; env->perf = 0.0f;
-        } else {
-            /* draw */
-            env->perf = 0.0f;
-        }
-    }
-
+    terminate(env);
     updateActionMasks(env);
     computeObs(env);
 }
