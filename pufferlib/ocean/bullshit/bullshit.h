@@ -25,7 +25,7 @@
 #define DECK_SIZE 52
 #define MAX_PILE_SIZE 48
 #define BOTS 3
-#define PLAYERS BOTS + 1 // multi-agent?
+#define PLAYERS BOTS + 1
 
 static const int DECK[DECK_SIZE] = {
     1,1,1,1, 2,2,2,2, 3,3,3,3,
@@ -186,7 +186,7 @@ void c_reset(CBullshit* env) {
    26..38: known history (13) norm /4
    39: player1 total // norm /13
    40: player2 total // norm /13
-   41: player3 total // norm /13
+   41: player3 total // norm /13s
    42: pile size // norm /48?
    43..55: last_declared_rank (13 one-hot)
    56: last_declared_count // norm /4
@@ -194,36 +194,36 @@ void c_reset(CBullshit* env) {
 */
 
 static inline void computeObs(CBullshit* env) {
-    int ob=0;
+    float* obs = env->observations;
     for (int r = 0; r < RANKS; r++) {
-        env->observations[ob++] = (float)env->hands[0][r] / SUITS;
+        *obs++ = (float)env->hands[0][r] / SUITS;
     }
     for (int r = 0; r < RANKS; r++) {
-        env->observations[ob++] = (float)env->claimed[r] / SUITS;
+        *obs++ = (float)env->claimed[r] / SUITS;
     }
     for (int r = 0; r < RANKS; r++) {
-        env->observations[ob++] = (float)env->known[r] / SUITS;
+        *obs++ = (float)env->known[r] / SUITS;
     }
-    env->observations[ob++] = (float)env->hand_totals[1] / RANKS;
-    env->observations[ob++] = (float)env->hand_totals[2] / RANKS;
-    env->observations[ob++] = (float)env->hand_totals[3] / RANKS;
-    env->observations[ob++] = (float)env->pile_size / MAX_PILE_SIZE;
+    *obs++ = (float)env->hand_totals[1] / RANKS;
+    *obs++ = (float)env->hand_totals[2] / RANKS;
+    *obs++ = (float)env->hand_totals[3] / RANKS;
+    *obs++ = (float)env->pile_size / MAX_PILE_SIZE;
     for (int r = 0; r < RANKS; r++) {
-        env->observations[ob++] = (env->last_declared_rank == r) ? 1.0f : 0.0f;
+        *obs++ = (env->last_declared_rank == r) ? 1.0f : 0.0f;
     }
-    env->observations[ob++] = (float)env->last_declared_count / SUITS;
+    *obs++ = (float)env->last_declared_count / SUITS;
     for (int i = 0; i < ACTIONS_SIZE; i++) {
-        env->observations[ob++] = (float)env->action_masks[i];
+        *obs++ = (float)env->action_masks[i];
     }
 }
 
 static inline void updateActionMasks(CBullshit* env) {
     int agent_total = env->hand_totals[0];
     for (int a = 0; a < RANKS * SUITS; a++) {
-        int declared_count = 1 + (a % SUITS);
-        env->action_masks[a] = (agent_total < declared_count);
+        int declarable_count = 1 + (a % SUITS);
+        env->action_masks[a] = (agent_total >= declarable_count);
     }
-    env->action_masks[CALL_BS_ACTION] = !env->can_call;
+    env->action_masks[CALL_BS_ACTION] = env->can_call; // if can_call mask = 1, therefore legal
 }
 
 static void addCardsToHand(CBullshit* env, int player, int *cards, int n) {
