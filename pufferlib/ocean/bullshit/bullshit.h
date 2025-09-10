@@ -28,11 +28,11 @@
 #define PLAYERS BOTS + 1
 
 static const int DECK[DECK_SIZE] = {
-    1,1,1,1, 2,2,2,2, 3,3,3,3,
-    4,4,4,4, 5,5,5,5, 6,6,6,6,
-    7,7,7,7, 8,8,8,8, 9,9,9,9,
-    10,10,10,10,  11,11,11,11,
-    12,12,12,12,  13,13,13,13
+    0,0,0,0, 1,1,1,1, 2,2,2,2,
+    3,3,3,3, 4,4,4,4, 5,5,5,5,
+    6,6,6,6, 7,7,7,7, 8,8,8,8,
+    9,9,9,9,     10,10,10,10,
+    11,11,11,11, 12,12,12,12
 };
 
 #define MAX_EPISODE_LENGTH 1000
@@ -158,10 +158,10 @@ void c_reset(CBullshit* env) {
         int r1 = env->deck[i+1];
         int r2 = env->deck[i+2];
         int r3 = env->deck[i+3];
-        env->hands[0][r0-1] += 1;
-        env->hands[1][r1-1] += 1;
-        env->hands[2][r2-1] += 1;
-        env->hands[3][r3-1] += 1;
+        env->hands[0][r0] += 1;
+        env->hands[1][r1] += 1;
+        env->hands[2][r2] += 1;
+        env->hands[3][r3] += 1;
     }
     env->hand_totals[0] += DECK_SIZE/PLAYERS;
     env->hand_totals[1] += DECK_SIZE/PLAYERS;
@@ -228,7 +228,7 @@ static inline void updateActionMasks(CBullshit* env) {
 
 static void addCardsToHand(CBullshit* env, int player, int *cards, int n) {
     for (int i = 0; i < n; i++) {
-        int r = cards[i] -1;
+        int r = cards[i];
         env->hands[player][r] += 1;
     }
     env->hand_totals[player] += n;
